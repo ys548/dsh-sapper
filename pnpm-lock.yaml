@@ -2500,6 +2500,8 @@ importers:
         specifier: workspace:~
         version: link:../../../vendor/cordis
 
+  packages/bundle/dsh-sapper: {}
+
   packages/bundle/headless:
     dependencies:
       '@deepseek-ai/dsh-brand':
