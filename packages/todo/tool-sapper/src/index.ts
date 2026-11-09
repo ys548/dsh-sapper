@@ -53,7 +53,7 @@ export const Config: z<Config> = z.object({
 })
 
 /** One node shape shared by facts and intents; both are flat JSON documents. */
-interface GraphNode {
+export interface GraphNode {
   id?: string
   title?: string
   description?: string
@@ -857,7 +857,7 @@ function sanitizeSegment(value: string): string {
 }
 
 /** One supervisor audit conclusion, as recorded by `sapper_drive` or lane-auditor. */
-interface AuditRecord {
+export interface AuditRecord {
   readonly verdict: 'pass' | 'reject'
   readonly level?: string
   readonly missing?: string
@@ -871,7 +871,7 @@ interface AuditRecord {
  * `target=<fact id>`, `verdict=pass|reject` and optionally `level` / `missing`.
  * Later notes win, so a re-audit after补证 overrides the earlier rejection.
  */
-function auditLedger(facts: GraphNode[]): Map<string, AuditRecord> {
+export function auditLedger(facts: GraphNode[]): Map<string, AuditRecord> {
   const ledger = new Map<string, AuditRecord>()
   for (const note of facts) {
     if (note.kind !== 'note') continue
@@ -893,7 +893,7 @@ function auditLedger(facts: GraphNode[]): Map<string, AuditRecord> {
 }
 
 /** Build the per-finding report skeleton. */
-function findingTemplate(target: string, finding: GraphNode, audit?: AuditRecord): string {
+export function findingTemplate(target: string, finding: GraphNode, audit?: AuditRecord): string {
   const data = finding.data && Object.keys(finding.data).length > 0
     ? Object.entries(finding.data).map(([k, v]) => `- ${k}: ${String(v)}`).join('\n')
     : '- (none recorded)'
@@ -955,7 +955,7 @@ ${data}
 }
 
 /** Build the summary report skeleton. */
-function summaryTemplate(
+export function summaryTemplate(
   target: string,
   graph: { project: GraphProject; facts: GraphNode[]; intents: GraphNode[] },
   passed: GraphNode[],
