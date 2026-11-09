@@ -1,0 +1,11 @@
+# dsh-sapper bundle patch layer.
+#
+# One profile-level row. It mounts the two things that must exist exactly once
+# per profile: the read-only collaboration-board route and the sapper skill
+# catalog (the 43 methodology skills + 7 lane specs shipped under `presets/`).
+# The agent presets themselves are separate patch layers listed in this
+# package's `package.json` (`dsh.bundle.patch`), and the per-agent tools arrive
+# through `dsh-sapper/tool` inside those presets.
+- insert:
+    - id: dsh-sapper
+      name: dsh-sapper
