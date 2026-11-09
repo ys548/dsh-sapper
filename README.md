@@ -104,6 +104,7 @@ pnpm exec tsc -b packages/bundle/dsh-sapper/tsconfig.json
 
 ## 已知限制
 
-- 只能在 **Web** 端跑：headless bundle 不组合任何预设名单，`dsh headless` 无法加载 sapper。
+- **桌面端（DSH 应用）与浏览器里的 Web GUI 都正常**：两者都跑 `web-app` bundle，`sapper` / `sapper-worker` 预设照常加载。
+- 只有 **`dsh headless`（一次性 CLI 模式）** 不加载 sapper：headless bundle 不组合预设名单，agent 直接按 profile 行组合，预设不会 mount。需要脚本驱动时走 Web 端（会话 + 工具调用），或用 `sapper_cli` 直接操作 `.sapper` 事实图。
 - 画板与工具都依赖工作区里有 `.sapper/`；没有图时画板显示空态。
 - 包内 CLI 只是运行集，不含上游的 `docker/`、`skill/`、`templates/`、`peers/` 等旁路能力。
