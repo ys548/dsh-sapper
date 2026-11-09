@@ -168,6 +168,12 @@ export interface SpawnTeammateRequest {
   readonly prompt: ContentBlock[]
   readonly context: 'fresh' | 'fork'
   readonly provider: string
+  /**
+   * Agent preset the teammate runs with. Omitted means the teammate inherits
+   * the Lead's composed plugins, which gives it the Lead's persona too; pass an
+   * explicit executor preset when the teammate must act instead of supervise.
+   */
+  readonly agentPreset?: string
   readonly signal: AbortSignal
 }
 

@@ -503,6 +503,7 @@
     { "path": "./packages/experimental/webhook" },
     { "path": "./packages/experimental/webhook-github" },
     { "path": "./packages/todo/tool-todo" },
+    { "path": "./packages/todo/tool-sapper" },
     { "path": "./packages/plan/plan-mode" },
     { "path": "./packages/preset/agent-preset-registry" },
     { "path": "./packages/preset/agent-preset" },

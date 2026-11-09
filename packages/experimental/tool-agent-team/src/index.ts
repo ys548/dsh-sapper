@@ -21,6 +21,11 @@ export interface Config {
   readonly freshProvider?: string
   /** Continuable-subagent provider used for completed-prefix fork teammates. */
   readonly forkProvider?: string
+  /**
+   * Agent preset every fresh teammate runs with when the call omits one.
+   * Omitted means teammates inherit the Lead's composed plugins and persona.
+   */
+  readonly memberPreset?: string
 }
 
 /** Loader schema for the opt-in Team tool plugin. */
@@ -28,6 +33,7 @@ export const Config: z<Config> = z.object({
   interrupt: z.boolean().default(true),
   freshProvider: z.string().default('spawn'),
   forkProvider: z.string().default('fork'),
+  memberPreset: z.string().min(1),
 })
 
 /** Model-facing collaboration guidance shared by Lead and teammates. */
@@ -40,6 +46,8 @@ Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VE
 
 Use the target returned by spawn_teammate or list_agents for send_message${interrupt ? ' and interrupt_agent' : ''}, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A peer message starts with its sender name. A successful send does not mean the recipient has processed it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
 }
+
+type ResolvedConfig = Required<Omit<Config, 'memberPreset'>> & { readonly memberPreset?: string }
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -165,7 +173,7 @@ function callingAgent(agent: Agent | undefined, toolName: string): Agent {
 }
 
 /** Register the complete Team tool set in one exact Agent scope. */
-function install(agent: Agent, ctx: Context, config: Required<Config>): () => void {
+function install(agent: Agent, ctx: Context, config: ResolvedConfig): () => void {
   const scoped = agent.ctx
   const disposers: Array<() => unknown> = []
   const register = (disposer: () => unknown): void => { disposers.push(disposer) }
@@ -201,17 +209,24 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
           enum: ['fresh', 'fork'],
           description: 'fresh starts without Lead history; fork inherits completed Lead turns. Defaults to fresh.',
         },
+        agentPreset: {
+          type: 'string',
+          description: 'Agent preset the teammate runs with. Omit to let it inherit the Lead plugins and persona; '
+            + 'pass an executor preset when the teammate must act on its own instead of coordinating.',
+        },
       },
       output: jsonOutput(SPAWN_VALUE_SCHEMA),
       async execute(args, exec) {
         const agent = callingAgent(exec.agent, 'spawn_teammate')
         const context = args.context ?? 'fresh'
+        const agentPreset = args.agentPreset ?? config.memberPreset
         const result = await ctx.agentTeams.spawnTeammate(agent, {
           name: args.name,
           description: args.description,
           prompt: [{ type: 'text', text: args.prompt }],
           context,
           provider: context === 'fork' ? config.forkProvider : config.freshProvider,
+          ...agentPreset === undefined ? {} : { agentPreset },
           signal: exec.signal,
         })
         return { member: modelMember(result.member) }
@@ -409,10 +424,11 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
 
 /** Install Team tools in every live or subsequently published Team member scope. */
 export function apply(ctx: Context, config: Config = {}): void {
-  const resolved: Required<Config> = {
+  const resolved: ResolvedConfig = {
     interrupt: config.interrupt ?? true,
     freshProvider: config.freshProvider ?? 'spawn',
     forkProvider: config.forkProvider ?? 'fork',
+    ...config.memberPreset === undefined ? {} : { memberPreset: config.memberPreset },
   }
   const installed = new Map<Agent, () => void>()
   const maybeInstall = (agent: Agent): void => {

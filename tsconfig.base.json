@@ -211,7 +211,7 @@
       // dir names are unique across groups, so first-on-disk-wins resolution is
       // unambiguous; adding a package under an existing group needs no edit
       // here. The aggregates' project references (tsconfig.host.json /
-      // tsconfig.client.json) stay explicit — TS project references have no
+      // tsconfig.client.json) stay explicit 閳?TS project references have no
       // wildcard form.
       "@deepseek-ai/dsh-host-directory-picker": ["./packages/host/directory-picker/src"],
       "@deepseek-ai/dsh-host-directory-picker/*": ["./packages/host/directory-picker/src/*"],
@@ -311,6 +311,7 @@
       "@deepseek-ai/dsh-client-ui-jobs": ["./packages/client/ui-jobs/src"],
       "@deepseek-ai/dsh-client-ui-jobs/client": ["./packages/client/ui-jobs/src/client/index.ts"],
       "@deepseek-ai/dsh-client-ui-schedule": ["./packages/client/ui-schedule/src"],
+      "@deepseek-ai/dsh-client-ui-sapper-board": ["./packages/client/ui-sapper-board/src"],
       "@deepseek-ai/dsh-client-ui-schedule/client": ["./packages/client/ui-schedule/src/client/index.ts"],
       "@deepseek-ai/dsh-client-ui-plan": ["./packages/client/ui-plan/src"],
       "@deepseek-ai/dsh-client-ui-user-questions": ["./packages/client/ui-user-questions/src"],
@@ -366,7 +367,7 @@
       "@deepseek-ai/dsh-compaction-image-offload/projection": ["./packages/compaction/compaction-image-offload/src/projection.ts"],
       "@deepseek-ai/dsh-session-format-catalog/message-projections": ["./packages/session/session-format-catalog/src/message-projections.ts"],
       "@deepseek-ai/dsh-native-command/types": ["./packages/util/native-command/src/types.ts"],
-      // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
+      // BEGIN generated package aliases 閳?pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
       "@deepseek-ai/dsh-agent": ["./packages/core/agent/src"],
@@ -538,6 +539,7 @@
       "@deepseek-ai/dsh-tool-subagent-control": ["./packages/subagent/tool-subagent-control/src"],
       "@deepseek-ai/dsh-tool-terminal": ["./packages/experimental/tool-terminal/src"],
       "@deepseek-ai/dsh-tool-todo": ["./packages/todo/tool-todo/src"],
+      "@deepseek-ai/dsh-tool-sapper": ["./packages/todo/tool-sapper/src"],
       "@deepseek-ai/dsh-tool-web": ["./packages/web/tool-web/src"],
       "@deepseek-ai/dsh-tool-workflow": ["./packages/workflow/tool-workflow/src"],
       "@deepseek-ai/dsh-tool-working-directory": ["./packages/session/tool-working-directory/src"],

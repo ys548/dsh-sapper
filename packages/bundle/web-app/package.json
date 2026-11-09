@@ -39,6 +39,10 @@
     "presets/ptc.patch.yml",
     "presets/minimal.patch.yml",
     "presets/cordis.patch.yml",
+    "presets/sapper.patch.yml",
+    "presets/sapper-worker.patch.yml",
+    "presets/sapper-skills/**",
+    "presets/sapper-lanes/**",
     "lib/public-url-*.js",
     "lib/types/**/*.d.ts"
   ],
@@ -50,7 +54,9 @@
         "./presets/standard.patch.yml",
         "./presets/ptc.patch.yml",
         "./presets/minimal.patch.yml",
-        "./presets/cordis.patch.yml"
+        "./presets/cordis.patch.yml",
+        "./presets/sapper.patch.yml",
+        "./presets/sapper-worker.patch.yml"
       ]
     }
   },
@@ -77,6 +83,7 @@
     "@deepseek-ai/dsh-client-ui-approval": "workspace:*",
     "@deepseek-ai/dsh-client-ui-attachment": "workspace:*",
     "@deepseek-ai/dsh-client-ui-brand-official": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-sapper-board": "workspace:*",
     "@deepseek-ai/dsh-client-ui-chat": "workspace:*",
     "@deepseek-ai/dsh-client-ui-commands": "workspace:*",
     "@deepseek-ai/dsh-client-ui-conversation": "workspace:*",
@@ -173,6 +180,7 @@
     "@deepseek-ai/dsh-tool-subagent": "workspace:*",
     "@deepseek-ai/dsh-tool-subagent-control": "workspace:*",
     "@deepseek-ai/dsh-tool-todo": "workspace:*",
+    "@deepseek-ai/dsh-tool-sapper": "workspace:*",
     "@deepseek-ai/dsh-tool-web": "workspace:*",
     "@deepseek-ai/dsh-tool-workflow": "workspace:*",
     "@deepseek-ai/dsh-web-frontend": "workspace:*",

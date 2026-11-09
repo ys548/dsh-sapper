@@ -266,6 +266,7 @@ export class TeamRoster {
         childId,
         provider: request.provider,
         label: description,
+        ...request.agentPreset === undefined ? {} : { agentPreset: request.agentPreset },
         request: {
           prompt: request.prompt,
           parent: root,

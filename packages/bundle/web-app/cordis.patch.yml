@@ -12,7 +12,7 @@
 # directly from `webStartup`.
 # `dsh --profile web --help` provides no `webStartup`, so no server binds.
 
-# ── surface-specific values the base deliberately omits ─────────────────────
+# 閳光偓閳光偓 surface-specific values the base deliberately omits 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 
 - id: system-prompt
   config:
@@ -37,7 +37,7 @@
     # once the web UI owns the choice per session.
     mode: !!js process.env.DSH_TOOLS_MODE
 
-# ── web-only host rows, the transport layer, and the browser roster ─────────
+# 閳光偓閳光偓 web-only host rows, the transport layer, and the browser roster 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 
 # `dsh.client` rows are the browser roster the modules node half scans into
 # window.__DSH_BOOT__; the modules row is simultaneously a host row.
@@ -168,7 +168,7 @@
     - id: web-startup
       name: '@deepseek-ai/dsh-web-app/startup'
 
-    # ── layer 2: transport/service ──────────────────────────────────────────────
+    # 閳光偓閳光偓 layer 2: transport/service 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 
     # Plain route-registration carrier; host and port come from the app's
     # webStartup provider, with these deployment fallbacks. The dist is served
@@ -218,7 +218,7 @@
     - id: client-hmr
       name: '@deepseek-ai/dsh-client-hmr'
 
-    # ── browser plugin roster (dsh.client rows; node halves are layer-2 hosts) ──
+    # 閳光偓閳光偓 browser plugin roster (dsh.client rows; node halves are layer-2 hosts) 閳光偓閳光偓
 
     # Dual-face: the node half scans this tree, composes window.__DSH_BOOT__,
     # and serves /plugins/<id>/client.js; the browser half is the module table
@@ -335,6 +335,10 @@
     # Official occupants for the generic sidebar and conversation brand slots.
     - id: ui-brand-official
       name: '@deepseek-ai/dsh-client-ui-brand-official'
+
+    # sapper fact-graph collaboration board (typed facts + intents attack map).
+    - id: ui-sapper-board
+      name: '@deepseek-ai/dsh-client-ui-sapper-board'
 
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'
@@ -462,7 +466,7 @@
     - id: ui-trajectory
       name: '@deepseek-ai/dsh-client-ui-trajectory'
 
-# ── the agent plane moves behind agent presets ─────────────────────────────
+# 閳光偓閳光偓 the agent plane moves behind agent presets 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 #
 # Every row below composes what ONE agent contributes to the host registries:
 # its tools, its prompt sections, its delegation backends. The base keeps them
@@ -475,7 +479,7 @@
 
 # `shell-env` STAYS in the host plane: `apps/cli/src/web.ts` injects it to
 # publish `DSH_WEB_URL`/`DSH_WEB_MODE`, and a host row that injects a service is
-# the criterion for host-plane ownership — injection resolves before any session
+# the criterion for host-plane ownership 閳?injection resolves before any session
 # exists, so there is no agent to key by. Behind a preset realm those variables
 # would never reach the model's shell at all.
 
@@ -489,8 +493,8 @@
   disabled: true
 
 # The background-job REGISTRY stays on the host plane; only the model-facing
-# `job_*` controls move. Its producers — `tool-bash` here and `tool-terminal`
-# elsewhere — are preset rows that resolve it
+# `job_*` controls move. Its producers 閳?`tool-bash` here and `tool-terminal`
+# elsewhere 閳?are preset rows that resolve it
 # with `ctx.get`, and an entry-local realm around the registry is invisible to
 # every sibling row outside that realm, so `run_in_background` answered
 # "background jobs unavailable" while the controls sat in the catalog. That is
@@ -508,8 +512,8 @@
   disabled: true
 
 # The `skill` REGISTRY stays in the host plane. It is host+per-scope layered
-# (the tools-registry shape): deployment-level providers — repository plugins,
-# a host skill-filesystem row — register into its global layer, while a preset's
+# (the tools-registry shape): deployment-level providers 閳?repository plugins,
+# a host skill-filesystem row 閳?register into its global layer, while a preset's
 # `skill-filesystem` registers into that preset's layer, and each agent reads the
 # merged catalog its scope chain selects. Only the per-agent rows move behind
 # presets: the base host `skill-filesystem` row is disabled here (presets own local
