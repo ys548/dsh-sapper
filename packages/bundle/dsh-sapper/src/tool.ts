@@ -59,7 +59,7 @@ export function apply(
   ctx: Context,
   config: Partial<ToolSapperConfig> = {},
 ): void {
-  applySapper(ctx as unknown as Parameters<typeof applySapper>[0], {
+  applySapper(ctx, {
     sapperRoot: config.sapperRoot ?? process.env.SAPPER_ROOT ?? bundledCliRoot(),
     pythonPath: config.pythonPath ?? process.env.SAPPER_PYTHON ?? 'python',
     store: config.store ?? '.sapper',
