@@ -1,7 +1,7 @@
 {
   "name": "dsh-sapper",
   "description": "sapper — 蜂群式授权渗透协同二开（事实图 / 七车道 / Supervisor 审计 / 报告门禁）的 DSH 可安装 bundle",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -32,7 +32,8 @@
   "scripts": {
     "build": "tsdown",
     "sync": "node scripts/sync-assets.mjs",
-    "check:skills": "node scripts/check-skills.mjs"
+    "check:skills": "node scripts/check-skills.mjs",
+    "check:lib": "node scripts/check-lib.mjs"
   },
   "dsh": {
     "bundle": {

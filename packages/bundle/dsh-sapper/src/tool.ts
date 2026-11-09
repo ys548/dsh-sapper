@@ -16,9 +16,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { apply as applySapper } from '@deepseek-ai/dsh-tool-sapper'
 import type { Config as ToolSapperConfig } from '@deepseek-ai/dsh-tool-sapper'
+import z from '@deepseek-ai/schemastery'
 import { resolve } from 'node:path'
 
-export { Config } from '@deepseek-ai/dsh-tool-sapper'
 export { inject } from '@deepseek-ai/dsh-tool-sapper'
 
 export const name = 'sapper-tools'
@@ -33,6 +33,21 @@ const PACKAGE_ROOT = resolve(import.meta.dirname, '..')
 export function bundledCliRoot(): string {
   return resolve(PACKAGE_ROOT, 'sapper')
 }
+
+/**
+ * Deployment defaults for the installed bundle.
+ *
+ * `@deepseek-ai/dsh-tool-sapper`'s schema defaults to the fork's absolute
+ * checkout paths, and the Loader parses a row's Config through the exported
+ * schema *before* `apply` runs — so re-exporting it would override the
+ * install-relative defaults on every install. Only the field set is shared.
+ */
+export const Config: z<ToolSapperConfig> = z.object({
+  sapperRoot: z.string().default(process.env.SAPPER_ROOT ?? bundledCliRoot()),
+  pythonPath: z.string().default(process.env.SAPPER_PYTHON ?? 'python'),
+  store: z.string().default('.sapper'),
+  timeoutMs: z.number().default(60_000),
+})
 
 /**
  * Mount the sapper tool set, filling install-relative defaults.
