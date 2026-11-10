@@ -30,32 +30,41 @@ interface GraphState {
 
 /**
  * Subscribe to one engagement graph.
+ *
+ * The last read per route is kept in a module-level cache, so a remount (the
+ * panel unmounts when switched away) paints the previous read at once and
+ * refreshes behind it instead of staring at the loading line again.
  * @param paused - when true, keep the last graph and stop polling.
  * @param cwd - store directory to read; null asks the Host to pick one.
  * @returns the latest graph, the target list, and loading and error state.
  */
+const cache = new Map<string, GraphState>()
+
 export function useSapperGraph(paused = false, cwd: string | null = null): GraphState {
-  const [state, setState] = useState<GraphState>({ graph: null, targets: [], loading: true, error: null, store: null })
+  const route = cwd === null || cwd.length === 0
+    ? GRAPH_ROUTE
+    : `${GRAPH_ROUTE}?cwd=${encodeURIComponent(cwd)}`
+  const [state, setState] = useState<GraphState>(
+    () => cache.get(route) ?? { graph: null, targets: [], loading: true, error: null, store: null },
+  )
 
   useEffect(() => {
     let cancelled = false
-    const route = cwd === null || cwd.length === 0
-      ? GRAPH_ROUTE
-      : `${GRAPH_ROUTE}?cwd=${encodeURIComponent(cwd)}`
-
     const read = async (): Promise<void> => {
       try {
         const response = await fetch(route, { headers: { accept: 'application/json' } })
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const payload = (await response.json()) as { graph?: GraphView; store?: string; targets?: SapperTarget[] }
         if (cancelled) return
-        setState({
+        const next: GraphState = {
           graph: payload.graph ?? null,
           targets: payload.targets ?? [],
           loading: false,
           error: null,
           store: payload.store ?? null,
-        })
+        }
+        cache.set(route, next)
+        setState(next)
       } catch (error) {
         if (cancelled) return
         setState(previous => ({
@@ -70,12 +79,17 @@ export function useSapperGraph(paused = false, cwd: string | null = null): Graph
 
     void read()
     if (paused) return () => { cancelled = true }
-    const timer = setInterval(() => { void read() }, POLL_MS)
+    /* Hidden pages skip polls; coming back visible reads once immediately. */
+    const tick = (): void => { if (!document.hidden) void read() }
+    const onVisible = (): void => { if (!document.hidden) void read() }
+    const timer = setInterval(tick, POLL_MS)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       cancelled = true
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [paused, cwd])
+  }, [paused, route])
 
   return state
 }

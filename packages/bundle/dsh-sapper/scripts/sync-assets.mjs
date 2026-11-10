@@ -27,7 +27,7 @@ const PACKAGE = resolve(HERE, '..')
 const REPO = resolve(PACKAGE, '../..')
 const WEB_APP_PRESETS = resolve(REPO, 'bundle/web-app/presets')
 const BOARD_CLIENT = resolve(REPO, 'client/ui-sapper-board/src/client')
-const SAVER_CLI = resolve(process.env.SAPPER_SOURCE ?? 'D:/demo/sapper-v2-18-champion/sapper-v2-18-champion')
+const SAVER_CLI = process.env.SAPPER_SOURCE === undefined ? '' : resolve(process.env.SAPPER_SOURCE)
 
 /**
  * Rewrite one preset patch file for an installed bundle.
@@ -75,6 +75,10 @@ mirror(BOARD_CLIENT, join(PACKAGE, 'src/client'))
 // The board's shared wire types live one level up from its client directory.
 cpSync(resolve(BOARD_CLIENT, '../types.ts'), join(PACKAGE, 'src/types.ts'))
 console.log(`client sources: ${readdirSync(join(PACKAGE, 'src/client')).join(', ')}`)
+
+if (SAVER_CLI === '') {
+  throw new Error('sync-assets: set SAPPER_SOURCE to the sapper CLI checkout that holds sapper.py and lib/')
+}
 
 const cliLib = join(SAVER_CLI, 'lib')
 const targetLib = join(PACKAGE, 'sapper/lib')

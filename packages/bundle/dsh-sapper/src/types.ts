@@ -62,6 +62,22 @@ export interface SapperTarget {
   intents: number
 }
 
+/** One written vulnerability report on disk. */
+export interface VulnReport {
+  /** Name taken from the report. */
+  name: string
+  /** First paragraph of the report's description. */
+  summary: string
+  /** 严重 / 高危 / 中危 / 低危, when the report states one. */
+  level: string
+  /** Absolute path of the report file. */
+  path: string
+  /** Vulnerable URL recorded in the report, when it has one. */
+  url?: string
+  /** Fact id backing a not-yet-written finding; absent for written reports. */
+  id?: string
+}
+
 /** The whole graph as the board renders it. */
 export interface GraphView {
   /** Engagement goal line. */
@@ -72,4 +88,6 @@ export interface GraphView {
   facts: FactNode[]
   /** Work units. */
   intents: IntentNode[]
+  /** Vulnerability reports written for this engagement. */
+  reports?: VulnReport[]
 }

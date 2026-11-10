@@ -17,9 +17,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import z from '@deepseek-ai/schemastery'
 import { readFile, readdir, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type { FactNode, GraphView, IntentNode, SapperTarget } from './types.ts'
+import type { FactNode, GraphView, IntentNode, SapperTarget, VulnReport } from './types.ts'
 
 export const name = 'ui-sapper-board'
 
@@ -105,11 +105,120 @@ async function loadGraph(storeDir: string): Promise<GraphView> {
   } catch {
     return { goal: null, status: null, facts: [], intents: [] }
   }
-  const [facts, intents] = await Promise.all([
+  const [facts, intents, reports] = await Promise.all([
     readNodes<FactNode>(join(storeDir, 'facts')),
     readNodes<IntentNode>(join(storeDir, 'intents')),
+    loadReports(storeDir, goal),
   ])
-  return { goal, status, facts, intents }
+  return { goal, status, facts, intents, reports }
+}
+
+/**
+ * Table cell in a report, stripped of markdown markers.
+ * @param text - report markdown.
+ * @param label - row label, such as 漏洞名称.
+ * @returns the cell text, or an empty string.
+ */
+function reportCell(text: string, label: string): string {
+  const match = text.match(new RegExp(`\\|\\s*\\*{0,2}${label}\\*{0,2}\\s*\\|\\s*([^\\n|]+)`, 'i'))
+  return match?.[1]?.replace(/[`*]/g, '').replace(/\s+/g, ' ').trim() ?? ''
+}
+
+/**
+ * Rating word from a severity cell.
+ * @param raw - the cell, which may include emoji and a CVSS score.
+ * @returns 严重 / 高危 / 中危 / 低危, or an empty string.
+ */
+function reportLevel(raw: string): string {
+  for (const name of ['严重', '高危', '中危', '低危']) if (raw.includes(name)) return name
+  return ''
+}
+
+/**
+ * First prose paragraph under the description heading.
+ * @param text - report markdown.
+ * @returns a short description.
+ */
+function reportSummary(text: string): string {
+  const match = text.match(/^#{1,3}[^\n]*漏洞描述[^\n]*\n+([\s\S]*?)(?=\n#{1,3}\s)/m)
+  if (!match) return ''
+  const paragraph = match[1].split(/\n\s*\n/).map(part => part.trim()).find(part =>
+    part !== '' && !part.startsWith('|') && !part.startsWith('>') && !part.startsWith('```') && !part.startsWith('- '))
+  return (paragraph ?? '').replace(/`/g, '').replace(/\s+/g, ' ').slice(0, 220)
+}
+
+/**
+ * Read one vulnerability report.
+ * @param text - markdown source.
+ * @param file - absolute path.
+ * @returns the row, or null when the file is not a vulnerability report.
+ */
+function parseReport(text: string, file: string): VulnReport | null {
+  if (!text.includes('漏洞名称') && !text.includes('【漏洞报告】')) return null
+  const named = reportCell(text, '漏洞名称')
+  const heading = text.match(/^#\s+(.+)$/m)?.[1]?.replace(/^【漏洞报告】/, '').trim() ?? ''
+  const name = named !== '' ? named : heading !== '' ? heading : basename(file, '.md')
+  if (name === '') return null
+  const level = reportLevel(reportCell(text, '严重程度') || reportCell(text, '最终定级'))
+  return { name, summary: reportSummary(text), level, path: file }
+}
+
+/**
+ * Vulnerability reports that belong to this engagement.
+ * Looks beside the store, then one and two directories up, and keeps files
+ * whose path names the engagement folder or a host in the goal.
+ * @param storeDir - absolute `.sapper` directory.
+ * @param goal - engagement goal, used to recognise the target.
+ * @returns reports, in path order.
+ */
+async function loadReports(storeDir: string, goal: string | null): Promise<VulnReport[]> {
+  const engagement = dirname(storeDir)
+  const roots = [join(engagement, 'reports'), join(dirname(engagement), 'reports'), join(dirname(dirname(engagement)), 'reports')]
+  const folder = basename(engagement)
+  const hosts = goal?.match(/(?:\d{1,3}\.){3}\d{1,3}|[a-z0-9][-a-z0-9.]*\.[a-z]{2,}/gi) ?? []
+  const needles = [folder, ...hosts].filter(item => item !== '')
+  const seen = new Set<string>()
+  const rows: VulnReport[] = []
+  for (const root of roots) {
+    let names: string[]
+    try {
+      names = await readdir(root, { recursive: true }) as string[]
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      const rel = String(name)
+      if (!rel.endsWith('.md') || !rel.includes(`${sep}漏洞报告${sep}`) || rel.includes(`${sep}evidence${sep}`)) continue
+      const file = resolve(root, rel)
+      if (seen.has(file)) continue
+      if (needles.length > 0 && !needles.some(needle => file.includes(needle))) continue
+      seen.add(file)
+      try {
+        const row = parseReport(await readFile(file, 'utf8'), file)
+        if (row !== null) rows.push(row)
+      } catch {
+        // A report that cannot be read is skipped.
+      }
+    }
+  }
+  rows.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
+  return rows
+}
+
+/**
+ * Reports one engagement holds, for the library's cross-engagement union.
+ * @param storeDir - absolute `.sapper` directory.
+ * @returns parsed report rows.
+ */
+async function reportsForStore(storeDir: string): Promise<VulnReport[]> {
+  let goal: string | null = null
+  try {
+    const project = JSON.parse(await readFile(join(storeDir, 'project.json'), 'utf8')) as { goal?: string | null }
+    goal = typeof project.goal === 'string' ? project.goal : null
+  } catch {
+    // A store without a readable project.json still contributes its reports.
+  }
+  return loadReports(storeDir, goal)
 }
 
 /** The workspace registry surface this route needs, when the Host provides it. */
@@ -247,6 +356,20 @@ export function apply(ctx: Context, config: Config): void {
           listTargets(config, rows),
         ])
         const graph = await loadGraph(storeDir)
+        /* The vulnerability library lists every delivered report, so the
+           response unions each registered engagement's reports — every store
+           anchors its own project-level reports directory — instead of only
+           the store this request resolved to. */
+        const seenReports = new Set((graph.reports ?? []).map(row => row.path))
+        for (const target of targets) {
+          if (resolve(target.cwd) === resolve(storeDir)) continue
+          for (const row of await reportsForStore(target.cwd)) {
+            if (seenReports.has(row.path)) continue
+            seenReports.add(row.path)
+            ;(graph.reports ??= []).push(row)
+          }
+        }
+        graph.reports?.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
         respond(response, 200, { found: graph.facts.length > 0, store: storeDir, graph, targets })
       })().catch((error: unknown) => {
         respond(response, 500, { found: false, error: String(error) })

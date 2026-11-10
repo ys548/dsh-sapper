@@ -1,10 +1,9 @@
 /**
  * sapper collaboration board.
  *
- * Facts and intents are both cards. Facts sit on even columns by dependency
- * rank; intents sit on the odd column just after the facts they consume, so an
- * open intent reads as a todo card instead of a label on an edge. Links are
- * solid curves that leave a card horizontally and sweep into the next.
+ * The board is a left-to-right flow: 起点 on the left, the clues a task reads,
+ * then the task and what it produced, merging into 目标 on the right.
+ * Edges for work that is still running carry a dash that travels toward 目标.
  *
  * The left rail switches between engagement stores. Colors come from the host
  * theme tokens, so light and dark both follow the rest of the app.
@@ -36,7 +35,6 @@ const GAP_X = 148
 const GAP_Y = 18
 const PAD_X = 48
 const PAD_Y = 40
-const MAX_PER_COLUMN = 5
 
 type NodeType = 'asset' | 'finding' | 'clue' | 'objective' | 'intent'
 
@@ -55,6 +53,7 @@ const STATUS_LABEL: Record<string, string> = {
   claimed: '执行中',
   pending: '待处理',
   done: '已完成',
+  complete: '已收口',
   abandoned: '已放弃',
   confirmed: '已确认',
 }
@@ -66,6 +65,7 @@ const STATUS_COLOR: Record<string, string> = {
   claimed: GOLD,
   pending: FAINT,
   done: TEAL,
+  complete: TEAL,
   abandoned: FAINT,
   confirmed: TEAL,
 }
@@ -202,6 +202,8 @@ interface Card {
   titleYs: number[]
   rowYs: number[]
   statusY: number | null
+  /** True when no intent reads or produces this card, so the flow has no edge for it. */
+  loose: boolean
 }
 
 /** A link between two cards. */
@@ -210,6 +212,17 @@ interface Edge {
   to: string
   color: string
   dashed: boolean
+  /** 0 stays in the gutter. Kept so older callers stay shape-compatible. */
+  lane: number
+  laneY: number
+  /** Attachment y on the source card. */
+  y1: number
+  /** Attachment y on the target card. */
+  y2: number
+  /** Work is still running; the stroke travels toward 目标. */
+  live: boolean
+  /** Short relation drawn on the curve, such as 推导 or 产出. */
+  label: string
 }
 
 interface Board {
@@ -218,37 +231,62 @@ interface Board {
   edges: Edge[]
   width: number
   height: number
+  /** Initial view covers the dependency chain; loose notes sit below this y. */
+  focusHeight: number
 }
 
-const EMPTY_BOARD: Board = { cards: [], byId: new Map(), edges: [], width: 0, height: 0 }
+const EMPTY_BOARD: Board = { cards: [], byId: new Map(), edges: [], width: 0, height: 0, focusHeight: 0 }
 
-/**
- * Dependency rank per fact: one past the deepest chain producing it.
- * @param facts - graph facts.
- * @param intents - graph intents.
- * @returns rank per fact id.
- */
-function factRanks(facts: FactNode[], intents: IntentNode[]): Map<string, number> {
-  const known = new Set(facts.map(f => f.id))
-  const rank = new Map<string, number>(facts.map(f => [f.id, 0]))
-  let changed = true
-  let guard = 0
-  while (changed && guard++ <= facts.length + 5) {
-    changed = false
-    for (const intent of intents) {
-      if (!intent.to || !known.has(intent.to)) continue
-      const deepest = (intent.from ?? []).reduce((max, id) => Math.max(max, rank.get(id) ?? 0), -1)
-      if ((rank.get(intent.to) ?? 0) < deepest + 1) {
-        rank.set(intent.to, deepest + 1)
-        changed = true
-      }
-    }
-  }
-  return rank
+const START_ID = '__start__'
+const TARGET_ID = '__target__'
+const TREE_GAP = 36
+
+function compareId(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true })
+}
+
+function isLiveIntent(intent: IntentNode): boolean {
+  const status = intent.status ?? (intent.to === null || intent.to === undefined ? 'open' : 'done')
+  return status === 'claimed' || status === 'open' || status === 'pending'
+}
+
+/** An agent is running only while its intent is claimed, open, or pending. */
+function isRunningIntent(intent: IntentNode): boolean {
+  return (intent.worker?.trim() ?? '') !== '' && isLiveIntent(intent)
+}
+
+/** Text the board search matches against. */
+function cardHaystack(card: Card): string {
+  return [
+    card.id,
+    card.badge,
+    card.status ?? '',
+    ...card.titleRows,
+    ...card.rows.flatMap(row => [row.label, row.value]),
+    card.fact?.title ?? '',
+    card.fact?.description ?? '',
+    card.fact?.kind ?? '',
+    card.intent?.title ?? '',
+    card.intent?.description ?? '',
+    card.intent?.worker ?? '',
+    ...(card.intent?.from ?? []),
+    card.intent?.to ?? '',
+  ].join('\n').toLowerCase()
+}
+
+/** Curve from the right edge of one card into the left edge of the next. */
+function linkPath(source: Card, target: Card, edge: Edge): string {
+  const x1 = source.x + CARD_W
+  const y1 = edge.y1
+  const x2 = target.x
+  const y2 = edge.y2
+  const span = Math.max(x2 - x1, 32)
+  const handle = Math.min(Math.max(span * 0.42, 48), 140)
+  return `M${x1},${y1} C${x1 + handle},${y1} ${x2 - handle},${y2} ${x2},${y2}`
 }
 
 /**
- * Build the board: interleave fact and intent columns by dependency rank.
+ * Build the board as a flow from 起点 to 目标.
  * @param facts - graph facts.
  * @param intents - graph intents.
  * @returns the laid-out board.
@@ -257,145 +295,320 @@ function buildBoard(facts: FactNode[], intents: IntentNode[]): Board {
   if (facts.length === 0 && intents.length === 0) return EMPTY_BOARD
 
   const titles = new Map(facts.map(fact => [fact.id, fact.title?.trim() || fact.id]))
-  const ranks = factRanks(facts, intents)
-  const intentRanks = new Map<string, number>()
-  for (const intent of intents) {
-    const deepest = (intent.from ?? []).reduce((max, id) => Math.max(max, ranks.get(id) ?? 0), 0)
-    intentRanks.set(intent.id, deepest)
-  }
-
-  const slotMap = new Map<number, { facts: FactNode[]; intents: IntentNode[] }>()
-  const slotOf = (index: number) => {
-    const existing = slotMap.get(index)
-    if (existing) return existing
-    const created = { facts: [] as FactNode[], intents: [] as IntentNode[] }
-    slotMap.set(index, created)
-    return created
-  }
-  for (const fact of facts) slotOf((ranks.get(fact.id) ?? 0) * 2).facts.push(fact)
-  for (const intent of intents) slotOf((intentRanks.get(intent.id) ?? 0) * 2 + 1).intents.push(intent)
-
-  interface Column { facts: FactNode[]; intents: IntentNode[] }
-  const columns: Column[] = []
-  for (const index of [...slotMap.keys()].sort((a, b) => a - b)) {
-    const slot = slotMap.get(index) ?? { facts: [], intents: [] }
-    const items: Array<{ kind: 'fact'; value: FactNode } | { kind: 'intent'; value: IntentNode }> = [
-      ...slot.facts
-        .slice()
-        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
-        .map(value => ({ kind: 'fact' as const, value })),
-      ...slot.intents
-        .slice()
-        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
-        .map(value => ({ kind: 'intent' as const, value })),
-    ]
-    for (let start = 0; start < items.length; start += MAX_PER_COLUMN) {
-      const chunk = items.slice(start, start + MAX_PER_COLUMN)
-      columns.push({
-        facts: chunk.filter(item => item.kind === 'fact').map(item => item.value as FactNode),
-        intents: chunk.filter(item => item.kind === 'intent').map(item => item.value as IntentNode),
-      })
-    }
-  }
-
-  const cards: Card[] = []
-  const byId = new Map<string, Card>()
-  const columnHeights: number[] = []
   const titleUnits = (CARD_W - 28) / 12.5
   const rowUnits = (CARD_W - 64) / 10.5
+  const cards: Card[] = []
+  const byId = new Map<string, Card>()
 
-  columns.forEach((column, columnIndex) => {
-    let y = PAD_Y
-    const entries = [
-      ...column.facts.map(fact => ({ kind: 'fact' as const, fact })),
-      ...column.intents.map(intent => ({ kind: 'intent' as const, intent })),
-    ]
-    for (const entry of entries) {
-      let type: NodeType
-      let badge: string
-      let titleSource: string
-      let rows: Row[]
-      let status: string | null
-
-      if (entry.kind === 'fact') {
-        const fact = entry.fact
-        type = factType(fact)
-        badge = TYPE[type].label
-        titleSource = fact.title?.trim() || fact.description?.trim() || fact.id
-        rows = factRows(fact)
-        status = typeof fact.data?.status === 'string' ? fact.data.status : null
-      } else {
-        const intent = entry.intent
-        type = 'intent'
-        const open = intent.to === null || intent.to === undefined
-        badge = TYPE.intent.label
-        titleSource = intent.title?.trim() || intent.description?.trim() || intent.id
-        const from = intent.from ?? []
-        rows = [{
-          label: '来源',
-          value: from.length > 0 ? from.map(id => titles.get(id) ?? id).join('、') : '—',
-        }]
-        if (intent.worker) rows.push({ label: '执行', value: intent.worker })
-        status = intent.status ?? (open ? 'open' : 'done')
-      }
-
-      const titleRows = wrap(titleSource, titleUnits, 2)
-      const displayRows = rows.map(row => ({ label: row.label, value: wrap(row.value, rowUnits, 1)[0] ?? '' }))
-
-      let cursor = 20
-      const chipY = cursor
-      cursor += 16
-      const titleYs = titleRows.map((_, index) => cursor + index * 17)
-      cursor += titleRows.length * 17 + 8
-      const rowYs = displayRows.map((_, index) => cursor + index * 15)
-      cursor += displayRows.length * 15
-      const statusY = status !== null ? cursor + 14 : null
-      const height = Math.max(CARD_MIN_H, (statusY ?? cursor) + 12)
-
-      const card: Card = {
-        id: entry.kind === 'fact' ? entry.fact.id : entry.intent.id,
-        kind: entry.kind,
-        ...(entry.kind === 'fact' ? { fact: entry.fact } : { intent: entry.intent }),
-        type,
-        badge,
-        titleRows,
-        rows: displayRows,
-        status,
-        x: PAD_X + columnIndex * (CARD_W + GAP_X),
-        y,
-        height,
-        column: columnIndex,
-        chipY,
-        titleYs,
-        rowYs,
-        statusY,
-      }
-      cards.push(card)
-      byId.set(card.id, card)
-      y += height + GAP_Y
+  const present = (
+    id: string,
+    kind: 'fact' | 'intent',
+    type: NodeType,
+    badge: string,
+    titleSource: string,
+    rows: Row[],
+    status: string | null,
+    fact?: FactNode,
+    intent?: IntentNode,
+  ): Card => {
+    const titleRows = wrap(titleSource, titleUnits, 2)
+    const displayRows = rows.map(row => ({ label: row.label, value: wrap(row.value, rowUnits, 1)[0] ?? '' }))
+    let cursor = 20
+    const chipY = cursor
+    cursor += 16
+    const titleYs = titleRows.map((_, index) => cursor + index * 17)
+    cursor += titleRows.length * 17 + 8
+    const rowYs = displayRows.map((_, index) => cursor + index * 15)
+    cursor += displayRows.length * 15
+    const statusY = status !== null ? cursor + 14 : null
+    const height = Math.max(CARD_MIN_H, (statusY ?? cursor) + 12)
+    const card: Card = {
+      id,
+      kind,
+      ...(fact ? { fact } : {}),
+      ...(intent ? { intent } : {}),
+      type,
+      badge,
+      titleRows,
+      rows: displayRows,
+      status,
+      x: 0,
+      y: 0,
+      height,
+      column: 0,
+      chipY,
+      titleYs,
+      rowYs,
+      statusY,
+      loose: false,
     }
-    columnHeights.push(y)
-  })
-
-  const edges: Edge[] = []
-  for (const intent of intents) {
-    if (!byId.has(intent.id)) continue
-    const open = intent.to === null || intent.to === undefined
-    for (const fromId of intent.from ?? []) {
-      if (!byId.has(fromId)) continue
-      edges.push({ from: fromId, to: intent.id, color: EDGE, dashed: open })
-    }
-    if (intent.to && byId.has(intent.to)) {
-      edges.push({ from: intent.id, to: intent.to, color: EDGE, dashed: false })
-    }
+    cards.push(card)
+    byId.set(card.id, card)
+    return card
   }
 
-  const tallest = Math.max(1, ...columnHeights)
-  const height = Math.max(460, tallest + 24)
-  const width = PAD_X * 2 + Math.max(0, columns.length - 1) * (CARD_W + GAP_X) + CARD_W
-  return { cards, byId, edges, width, height }
-}
+  for (const fact of facts) {
+    if (fact.id === 'goal') continue
+    const type = factType(fact)
+    present(
+      fact.id,
+      'fact',
+      type,
+      TYPE[type].label,
+      fact.title?.trim() || fact.description?.trim() || fact.id,
+      factRows(fact),
+      typeof fact.data?.status === 'string' ? fact.data.status : null,
+      fact,
+    )
+  }
+  for (const intent of intents) {
+    const open = intent.to == null
+    const from = intent.from ?? []
+    const rows: Row[] = [{
+      label: '来源',
+      value: from.length > 0 ? from.map(id => titles.get(id) ?? id).join('、') : '—',
+    }]
+    if (intent.worker) rows.push({ label: '执行', value: intent.worker })
+    present(
+      intent.id,
+      'intent',
+      'intent',
+      '子任务',
+      intent.title?.trim() || intent.description?.trim() || intent.id,
+      rows,
+      intent.status ?? (open ? 'open' : 'done'),
+      undefined,
+      intent,
+    )
+  }
 
+  const goal = facts.find(fact => fact.id === 'goal')
+  const start = present(
+    START_ID,
+    'fact',
+    'objective',
+    '起点',
+    goal?.description?.trim() || goal?.title?.trim() || '起点',
+    [],
+    null,
+    goal,
+  )
+
+  const producedBy = new Map<string, string>()
+  for (const intent of intents) {
+    if (intent.to && intent.to !== 'goal' && byId.has(intent.to)) producedBy.set(intent.to, intent.id)
+  }
+  const intentById = new Map(intents.map(intent => [intent.id, intent]))
+  const flowIds = new Set<string>([START_ID])
+  for (const intent of intents) {
+    flowIds.add(intent.id)
+    for (const id of intent.from ?? []) {
+      if (id !== 'goal' && byId.has(id)) flowIds.add(id)
+    }
+    if (intent.to && intent.to !== 'goal' && byId.has(intent.to)) flowIds.add(intent.to)
+  }
+
+  const sourcesOf = (id: string): string[] => {
+    if (id === START_ID) return []
+    const producer = producedBy.get(id)
+    if (producer) return [producer]
+    const intent = intentById.get(id)
+    if (!intent) return []
+    return (intent.from ?? []).filter(source => source !== 'goal' && source !== id && flowIds.has(source))
+  }
+
+  const columnMemo = new Map<string, number>()
+  const columnOf = (id: string, seen = new Set<string>()): number => {
+    const cached = columnMemo.get(id)
+    if (cached !== undefined) return cached
+    if (id === START_ID) {
+      columnMemo.set(id, 0)
+      return 0
+    }
+    if (seen.has(id)) return 1
+    seen.add(id)
+    let column = 1
+    const producer = producedBy.get(id)
+    if (producer) column = columnOf(producer, seen) + 1
+    else {
+      const sources = sourcesOf(id)
+      if (sources.length > 0) column = Math.max(...sources.map(source => columnOf(source, seen))) + 1
+    }
+    columnMemo.set(id, column)
+    return column
+  }
+  for (const id of flowIds) columnOf(id)
+
+  const placed = new Set<string>()
+  const columnCursor = new Map<number, number>()
+  const take = (id: string, idealCenter: number): Card | undefined => {
+    const card = byId.get(id)
+    if (!card || id === START_ID || placed.has(id)) return card
+    const column = columnOf(id)
+    const cursor = columnCursor.get(column) ?? PAD_Y
+    const y = Math.max(cursor, idealCenter - card.height / 2)
+    card.column = column
+    card.x = PAD_X + column * (CARD_W + GAP_X)
+    card.y = y
+    columnCursor.set(column, y + card.height + TREE_GAP)
+    placed.add(id)
+    return card
+  }
+  const centerOf = (card: Card): number => card.y + card.height / 2
+  const placing = new Set<string>()
+  const placeIntent = (intent: IntentNode): void => {
+    if (placed.has(intent.id) || placing.has(intent.id)) return
+    placing.add(intent.id)
+    const sources = sourcesOf(intent.id)
+    for (const source of sources) {
+      const producer = producedBy.get(source)
+      const upstream = producer ? intentById.get(producer) : undefined
+      if (upstream) placeIntent(upstream)
+    }
+    for (const source of sources) {
+      if (!producedBy.has(source)) take(source, PAD_Y)
+    }
+    const anchors = sources.filter(source => producedBy.has(source))
+    const aligned = (anchors.length > 0 ? anchors : sources)
+      .map(source => byId.get(source))
+      .filter((card): card is Card => card !== undefined && placed.has(card.id))
+    const mid = aligned.length > 0
+      ? aligned.reduce((sum, card) => sum + centerOf(card), 0) / aligned.length
+      : (columnCursor.get(columnOf(intent.id)) ?? PAD_Y)
+    const card = take(intent.id, mid)
+    if (card && intent.to && intent.to !== 'goal' && byId.has(intent.to)) take(intent.to, centerOf(card))
+    placing.delete(intent.id)
+  }
+  const pending = intents.filter(intent => sourcesOf(intent.id).every(source => !producedBy.has(source)))
+  const waiting = [...pending]
+  while (waiting.length > 0) {
+    waiting.sort((a, b) => {
+      const share = (item: IntentNode): number => sourcesOf(item.id).filter(source => placed.has(source)).length
+      return share(b) - share(a) || compareId(a.id, b.id)
+    })
+    const next = waiting.shift()
+    if (next) placeIntent(next)
+  }
+  const later = intents.filter(intent => sourcesOf(intent.id).some(source => producedBy.has(source)))
+  later.sort((a, b) => compareId(a.id, b.id))
+  for (const intent of later) placeIntent(intent)
+
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const id of flowIds) {
+    if (id === START_ID) continue
+    const card = byId.get(id)
+    if (!card || !placed.has(card.id)) continue
+    minY = Math.min(minY, card.y)
+    maxY = Math.max(maxY, card.y + card.height)
+  }
+  start.column = 0
+  start.x = PAD_X
+  start.y = (Number.isFinite(minY) ? (minY + maxY) / 2 : PAD_Y) - start.height / 2
+  const shift = PAD_Y - Math.min(Number.isFinite(minY) ? minY : PAD_Y, start.y)
+  if (shift > 0) {
+    for (const id of flowIds) {
+      const card = byId.get(id)
+      if (card) card.y += shift
+    }
+  }
+  const maxColumn = Math.max(0, ...[...flowIds].map(id => byId.get(id)?.column ?? 0))
+
+  const flowCards = [...flowIds].map(id => byId.get(id)).filter((card): card is Card => card !== undefined)
+  const treeMid = flowCards.reduce((sum, card) => sum + centerOf(card), 0) / Math.max(flowCards.length, 1)
+  const target = present(
+    TARGET_ID,
+    'fact',
+    'objective',
+    '目标',
+    goal?.title?.trim() || '目标',
+    goal ? factRows(goal) : [],
+    null,
+    goal,
+  )
+  target.column = maxColumn + 1
+  target.x = PAD_X + target.column * (CARD_W + GAP_X)
+  target.y = treeMid - target.height / 2
+
+  const liveIntent = new Set(intents.filter(isLiveIntent).map(intent => intent.id))
+  const edges: Edge[] = []
+  const seenEdge = new Set<string>()
+  const pushEdge = (from: string, to: string, live: boolean, label: string): void => {
+    const key = `${from}>${to}`
+    if (seenEdge.has(key) || from === to) return
+    const source = byId.get(from)
+    const dest = byId.get(to)
+    if (!source || !dest) return
+    seenEdge.add(key)
+    edges.push({
+      from,
+      to,
+      color: live ? GOLD : EDGE,
+      dashed: false,
+      lane: 0,
+      laneY: 0,
+      y1: source.y + source.height / 2,
+      y2: dest.y + dest.height / 2,
+      live,
+      label,
+    })
+  }
+  for (const id of flowIds) {
+    if (id === START_ID || sourcesOf(id).length > 0) continue
+    pushEdge(START_ID, id, liveIntent.has(id), '')
+  }
+  for (const intent of intents) {
+    const sources = sourcesOf(intent.id)
+    const live = liveIntent.has(intent.id)
+    for (const id of sources) pushEdge(id, intent.id, live, sources.length === 1 ? (live ? '推进' : '推导') : '')
+    if (intent.to && intent.to !== 'goal' && byId.has(intent.to)) {
+      const card = byId.get(intent.to)
+      const blocked = card?.status === 'blocked' || intent.status === 'blocked'
+      if (blocked && card) card.badge = '阻塞'
+      pushEdge(intent.id, intent.to, live, blocked ? '阻塞' : '产出')
+    }
+  }
+  const outgoing = new Set(edges.map(edge => edge.from))
+  const leaves = [...flowIds].filter(id => id !== START_ID && !outgoing.has(id))
+  for (const id of leaves) {
+    const producer = producedBy.get(id)
+    const live = liveIntent.has(id) || (producer !== undefined && liveIntent.has(producer))
+    pushEdge(id, TARGET_ID, live, leaves.length > 2 ? '' : (live ? '推进' : '指向'))
+  }
+
+  const loose = cards.filter(card => card.id !== TARGET_ID && !flowIds.has(card.id))
+  const flowBottom = Math.max(target.y + target.height, ...flowCards.map(card => card.y + card.height))
+  if (loose.length > 0) {
+    const gridCols = Math.min(Math.max(target.column + 1, 1), Math.max(loose.length, 1), 6)
+    loose.sort((a, b) => compareId(a.id, b.id))
+    const rowHeights: number[] = []
+    loose.forEach((card, index) => {
+      const row = Math.floor(index / gridCols)
+      rowHeights[row] = Math.max(rowHeights[row] ?? 0, card.height)
+    })
+    const rowTop: number[] = []
+    let cursor = flowBottom + 72
+    for (const height of rowHeights) {
+      rowTop.push(cursor)
+      cursor += height + GAP_Y
+    }
+    loose.forEach((card, index) => {
+      const column = index % gridCols
+      const row = Math.floor(index / gridCols)
+      card.loose = true
+      card.column = column
+      card.x = PAD_X + column * (CARD_W + GAP_X)
+      card.y = rowTop[row] ?? cursor
+    })
+  }
+
+  const bottom = Math.max(...cards.map(card => card.y + card.height))
+  const span = Math.max(...cards.map(card => card.column)) + 1
+  const width = PAD_X * 2 + (span - 1) * (CARD_W + GAP_X) + CARD_W
+  const height = Math.max(460, bottom + 72)
+  const focusHeight = Math.min(height, flowBottom + 56)
+  return { cards, byId, edges, width, height, focusHeight }
+}
 interface Tally {
   asset: number
   finding: number
@@ -407,10 +620,17 @@ interface Tally {
   done: number
 }
 
-function tallyOf(facts: FactNode[], intents: IntentNode[]): Tally {
-  const tally: Tally = { asset: 0, finding: 0, cred: 0, clue: 0, objective: 0, intent: intents.length, open: 0, done: 0 }
-  for (const fact of facts) {
-    switch (fact.kind) {
+function tallyOfBoard(cards: Card[]): Tally {
+  const tally: Tally = { asset: 0, finding: 0, cred: 0, clue: 0, objective: 0, intent: 0, open: 0, done: 0 }
+  for (const card of cards) {
+    if (card.loose || card.id === START_ID || card.id === TARGET_ID) continue
+    if (card.kind === 'intent') {
+      tally.intent += 1
+      if (card.status === 'done' || card.status === 'complete' || card.status === 'abandoned') tally.done += 1
+      else tally.open += 1
+      continue
+    }
+    switch (card.fact?.kind) {
       case 'host':
       case 'service':
         tally.asset += 1
@@ -428,10 +648,6 @@ function tallyOf(facts: FactNode[], intents: IntentNode[]): Tally {
       default:
         tally.clue += 1
     }
-  }
-  for (const intent of intents) {
-    if (intent.status === 'done') tally.done += 1
-    else tally.open += 1
   }
   return tally
 }
@@ -530,6 +746,9 @@ export function SapperBoard() {
   const [assetsOnly, setAssetsOnly] = useState(false)
   const [menu, setMenu] = useState<MenuId | null>(null)
   const [agentsOpen, setAgentsOpen] = useState(true)
+  const [railOpen, setRailOpen] = useState(true)
+  const [showLoose, setShowLoose] = useState(false)
+  const [search, setSearch] = useState('')
   const [view, setView] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const drag = useRef<{ x: number; y: number } | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -550,18 +769,28 @@ export function SapperBoard() {
     [viewGraph],
   )
 
-  const tally = useMemo(
-    () => tallyOf(viewGraph?.facts ?? [], viewGraph?.intents ?? []),
-    [viewGraph],
-  )
+  const tally = useMemo(() => tallyOfBoard(board.cards), [board.cards])
 
   useEffect(() => {
     if (selected !== null && !board.byId.has(selected)) setSelected(null)
   }, [board, selected])
 
   useEffect(() => {
-    if (board.width > 0 && board.height > 0) setView({ x: 0, y: 0, w: board.width, h: board.height })
-  }, [board.width, board.height])
+    if (board.width <= 0 || board.height <= 0) return
+    const query = search.trim().toLowerCase()
+    if (query !== '') {
+      const hits = board.cards.filter(card => cardHaystack(card).includes(query))
+      if (hits.length === 0) return
+      const minX = Math.min(...hits.map(card => card.x)) - 64
+      const minY = Math.min(...hits.map(card => card.y)) - 48
+      const maxX = Math.max(...hits.map(card => card.x + CARD_W)) + 64
+      const maxY = Math.max(...hits.map(card => card.y + card.height)) + 48
+      setView({ x: minX, y: minY, w: Math.max(maxX - minX, 480), h: Math.max(maxY - minY, 320) })
+      return
+    }
+    const focus = showLoose || board.focusHeight <= 0 ? board.height : Math.min(board.focusHeight, board.height)
+    setView({ x: 0, y: 0, w: board.width, h: focus })
+  }, [board, search, showLoose])
 
   useEffect(() => {
     if (menu === null) return undefined
@@ -575,8 +804,10 @@ export function SapperBoard() {
   const box = view ?? { x: 0, y: 0, w: Math.max(board.width, 800), h: Math.max(board.height, 500) }
 
   const fit = useCallback(() => {
-    if (board.width > 0 && board.height > 0) setView({ x: 0, y: 0, w: board.width, h: board.height })
-  }, [board.width, board.height])
+    if (board.width <= 0 || board.height <= 0) return
+    const focus = showLoose || board.focusHeight <= 0 ? board.height : Math.min(board.focusHeight, board.height)
+    setView({ x: 0, y: 0, w: board.width, h: focus })
+  }, [board.width, board.height, board.focusHeight, showLoose])
 
   const frameSelection = useCallback(() => {
     if (selected === null) {
@@ -637,7 +868,15 @@ export function SapperBoard() {
   }, [box])
 
   const toggleMenu = (id: MenuId): void => { setMenu(current => current === id ? null : id) }
-  const running = (graph?.intents ?? []).filter(intent => intent.worker && intent.status !== 'done' && intent.status !== 'abandoned')
+  const running = (graph?.intents ?? []).filter(isRunningIntent)
+  const query = search.trim().toLowerCase()
+  const matched = query === '' ? null : new Set(board.cards.filter(card => cardHaystack(card).includes(query)).map(card => card.id))
+  const shown = (card: Card): boolean => {
+    if (card.id === selected) return true
+    if (matched !== null) return matched.has(card.id)
+    return !card.loose || showLoose
+  }
+  const looseCount = board.cards.filter(card => card.loose).length
   const link = paused ? 'paused' : error ? 'down' : 'live'
   const selectedCard = selected !== null ? board.byId.get(selected) : undefined
   const filteredEmpty = graph !== null && graph.facts.length + graph.intents.length > 0 && board.cards.length === 0
@@ -649,7 +888,7 @@ export function SapperBoard() {
   return (
     <div style={rootStyle}>
       <div ref={barRef} style={toolbarStyle}>
-        <strong style={{ fontSize: 14, fontWeight: 650, marginRight: 8, flexShrink: 0 }}>协作画板</strong>
+        <strong style={{ fontSize: 14, fontWeight: 650, marginRight: 8, flexShrink: 0 }}>攻击图谱</strong>
 
         <button
           type="button"
@@ -677,6 +916,39 @@ export function SapperBoard() {
         >
           导出
         </button>
+        <input
+          value={search}
+          onChange={event => setSearch(event.target.value)}
+          placeholder="搜索事实、意图"
+          aria-label="搜索事实或意图"
+          style={{
+            width: 168,
+            marginLeft: 8,
+            height: 28,
+            flexShrink: 0,
+            borderRadius: 6,
+            border: '1px solid var(--dsw-alias-border-l2)',
+            background: 'var(--dsw-alias-bg-layer-2)',
+            color: LABEL,
+            fontSize: 12,
+            padding: '0 8px',
+            fontFamily: 'inherit',
+          }}
+        />
+        {looseCount > 0 ? (
+          <button
+            type="button"
+            aria-pressed={showLoose}
+            title="这些事实没有被任何意图的来源或产出引用，所以没有连线"
+            onClick={() => setShowLoose(value => !value)}
+            style={{
+              ...textBtnStyle,
+              ...(showLoose ? { color: GOLD } : { color: MUTED }),
+            }}
+          >
+            未引用 {looseCount}
+          </button>
+        ) : null}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flexShrink: 1 }}>
           <div style={{ position: 'relative', minWidth: 0, flexShrink: 1 }}>
@@ -684,6 +956,7 @@ export function SapperBoard() {
               type="button"
               onClick={() => toggleMenu('stats')}
               aria-expanded={menu === 'stats'}
+              title="只统计图上连出来的节点，不含未引用事实"
               style={{ ...textBtnStyle, color: MUTED, fontSize: 12, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}
             >
               资产 {tally.asset} / 意图 {tally.intent} / 成果 {tally.finding} / 凭据 {tally.cred}
@@ -699,6 +972,7 @@ export function SapperBoard() {
                 <StatRow label="目标物" value={tally.objective} />
                 <StatRow label="进行中" value={tally.open} />
                 <StatRow label="已完成" value={tally.done} />
+                <StatRow label="未引用" value={looseCount} />
               </div>
             ) : null}
           </div>
@@ -711,6 +985,8 @@ export function SapperBoard() {
           <TargetRail
             targets={targets}
             active={cwd ?? store}
+            open={railOpen}
+            onToggle={() => setRailOpen(value => !value)}
             onPick={(next) => {
               setCwd(next)
               setSelected(null)
@@ -741,7 +1017,7 @@ export function SapperBoard() {
                 height="100%"
                 style={{ display: 'block', cursor: drag.current ? 'grabbing' : 'grab', touchAction: 'none' }}
                 role="img"
-                aria-label="协作画板"
+                aria-label="攻击图谱"
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
@@ -752,6 +1028,12 @@ export function SapperBoard() {
                   <pattern id="sb-grid" width="18" height="18" patternUnits="userSpaceOnUse">
                     <circle cx="1" cy="1" r="0.9" fill={GRID_DOT} fillOpacity={0.45} />
                   </pattern>
+                  <marker id="sb-arrow" viewBox="0 0 8 8" markerWidth="7" markerHeight="7" refX="7" refY="4" orient="auto">
+                    <path d="M0,1 L7,4 L0,7 Z" fill={EDGE} />
+                  </marker>
+                  <marker id="sb-arrow-live" viewBox="0 0 8 8" markerWidth="7" markerHeight="7" refX="7" refY="4" orient="auto">
+                    <path d="M0,1 L7,4 L0,7 Z" fill={GOLD} />
+                  </marker>
                 </defs>
                 <rect x={box.x} y={box.y} width={box.w} height={box.h} fill={CANVAS_BG} />
                 <rect x={box.x} y={box.y} width={box.w} height={box.h} fill="url(#sb-grid)" />
@@ -759,29 +1041,38 @@ export function SapperBoard() {
                 {board.edges.map((edge, index) => {
                   const source = board.byId.get(edge.from)
                   const target = board.byId.get(edge.to)
-                  if (!source || !target) return null
-                  const dim = connected !== null && !(edge.from === hovered || edge.to === hovered)
-                  const x1 = source.x + CARD_W
-                  const y1 = source.y + source.height / 2
-                  const x2 = target.x
-                  const y2 = target.y + target.height / 2
-                  const dx = x2 - x1
-                  const dy = y2 - y1
-                  const span = Math.max(Math.abs(dx), 1)
-                  const dir = Math.sign(dx) || 1
-                  const handle = span * 0.5
-                  const side = dy === 0 ? 1 : Math.sign(dy)
-                  const sag = Math.max(span * 0.7, Math.abs(dy) * 0.55)
+                  if (!source || !target || !shown(source) || !shown(target)) return null
+                  const hot = hovered !== null && (edge.from === hovered || edge.to === hovered)
+                  const dim = connected !== null && !hot
+                  const d = linkPath(source, target, edge)
+                  const labelX = (source.x + CARD_W + target.x) / 2
+                  const labelY = (edge.y1 + edge.y2) / 2 - 7
                   return (
-                    <path
-                      key={`edge-${edge.from}-${edge.to}-${index}`}
-                      d={`M${x1},${y1} C${x1 + dir * handle},${y1 + side * sag} ${x2 - dir * handle},${y2 + side * sag * 0.35} ${x2},${y2}`}
-                      fill="none"
-                      stroke={edge.color}
-                      strokeOpacity={dim ? 0.06 : 0.92}
-                      strokeWidth={1.6}
-                      strokeLinecap="round"
-                    />
+                    <g key={`edge-${edge.from}-${edge.to}-${index}`} pointerEvents="none">
+                      {edge.live ? (
+                        <path d={d} fill="none" stroke={GOLD} strokeOpacity={dim ? 0.04 : 0.28} strokeWidth={7} strokeLinecap="round" />
+                      ) : null}
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke={edge.live ? GOLD : edge.color}
+                        strokeOpacity={hot ? 0.98 : dim ? 0.05 : edge.live ? 0.95 : 0.72}
+                        strokeWidth={edge.live ? 2.1 : 1.35}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeDasharray={edge.live ? '14 18' : undefined}
+                        markerEnd={edge.live ? 'url(#sb-arrow-live)' : 'url(#sb-arrow)'}
+                      >
+                        {edge.live ? (
+                          <animate attributeName="stroke-dashoffset" from="64" to="0" dur="1.15s" repeatCount="indefinite" />
+                        ) : null}
+                      </path>
+                      {edge.label ? (
+                        <text x={labelX} y={labelY} textAnchor="middle" fill={edge.live ? GOLD : MUTED} fontSize={11}>
+                          {edge.label}
+                        </text>
+                      ) : null}
+                    </g>
                   )
                 })}
 
@@ -790,6 +1081,8 @@ export function SapperBoard() {
                   const dim = connected !== null && !connected.has(card.id)
                   const isHover = hovered === card.id
                   const isSelected = selected === card.id
+                  const pin = card.badge === '起点' || card.badge === '目标'
+                  if (!shown(card)) return null
                   return (
                     <g
                       key={card.id}
@@ -815,8 +1108,8 @@ export function SapperBoard() {
                         height={card.height}
                         rx={8}
                         fill="none"
-                        stroke={isSelected ? BLUE : isHover ? 'var(--dsw-alias-border-l4)' : CARD_BORDER}
-                        strokeWidth={isSelected ? 1.6 : 1}
+                        stroke={isSelected ? BLUE : pin ? GOLD : isHover ? 'var(--dsw-alias-border-l4)' : CARD_BORDER}
+                        strokeWidth={isSelected || pin ? 1.6 : 1}
                       />
                       <g transform={`translate(${card.x},${card.y})`}>
                         <text x={14} y={card.chipY} fill={accent} fontSize={10} fontWeight={700} letterSpacing={0.6}>
@@ -860,6 +1153,11 @@ export function SapperBoard() {
                   当前筛选下没有节点
                 </div>
               ) : null}
+              {matched !== null && matched.size === 0 ? (
+                <div style={{ position: 'absolute', left: 16, bottom: 16, color: MUTED, fontSize: 12, pointerEvents: 'none' }}>
+                  没有匹配「{search.trim()}」
+                </div>
+              ) : null}
 
               <AgentPanel
                 open={agentsOpen}
@@ -890,12 +1188,35 @@ export function SapperBoard() {
 function TargetRail({
   targets,
   active,
+  open,
+  onToggle,
   onPick,
 }: {
   targets: SapperTarget[]
   active: string | null
+  open: boolean
+  onToggle: () => void
   onPick: (cwd: string) => void
 }) {
+  if (!open) {
+    return (
+      <aside style={{
+        width: 36,
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 10,
+        minHeight: 0,
+        paddingTop: 10,
+        borderRight: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-specific-sidebar-fill)',
+      }}>
+        <button type="button" onClick={onToggle} aria-expanded={false} title="展开目标" style={{ ...textBtnStyle, padding: '4px 6px', color: MUTED }}>›</button>
+        <div style={{ writingMode: 'vertical-rl', color: FAINT, fontSize: 11, fontWeight: 700, letterSpacing: 2 }}>目标</div>
+      </aside>
+    )
+  }
   return (
     <aside style={{
       width: 220,
@@ -906,7 +1227,10 @@ function TargetRail({
       borderRight: '1px solid var(--dsw-alias-border-l2)',
       background: 'var(--dsw-specific-sidebar-fill)',
     }}>
-      <div style={{ padding: '12px 14px 8px', color: FAINT, fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>目标</div>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '8px 8px 8px 14px' }}>
+        <div style={{ color: FAINT, fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>目标</div>
+        <button type="button" onClick={onToggle} aria-expanded title="收起目标" style={{ ...textBtnStyle, marginLeft: 'auto', padding: '2px 6px', color: MUTED }}>‹</button>
+      </div>
       <div style={{ overflow: 'auto', padding: '0 8px 12px' }}>
         {targets.map((target) => {
           const on = target.cwd === active

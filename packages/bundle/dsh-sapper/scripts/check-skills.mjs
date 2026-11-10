@@ -27,7 +27,7 @@ const provider = new FileSystemSkillProvider(
 )
 
 const started = Date.now()
-const listed = await provider.list({ cwd: 'D:/demo/Usual' })
+const listed = await provider.list({ cwd: process.cwd() })
 const candidates = Array.isArray(listed) ? listed : listed.candidates
 console.log('root:', ROOT)
 console.log('discovered:', candidates.length, 'in', Date.now() - started, 'ms', Array.isArray(listed) ? '' : '(incomplete observation)')

@@ -7,7 +7,8 @@ export const NS = 'sapper'
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  'title': '协作画板',
+  'title': '攻击图谱',
+  'library.title': '漏洞报告',
   'loading': '正在读取事实图…',
   'empty.title': '事实图还是空的',
   'empty.body': '让指挥官先用 sapper_fact 记下第一条已确认的观察，这里就会长出节点。',
@@ -25,7 +26,8 @@ export const zh = {
 
 /** English dictionary, checked against the Chinese key set. */
 export const en: typeof zh = {
-  'title': 'sapper board',
+  'title': 'attack graph',
+  'library.title': 'vuln reports',
   'loading': 'Reading the fact graph…',
   'empty.title': 'The fact graph is still empty',
   'empty.body': 'Have the commander record its first confirmed observation with sapper_fact and nodes will appear here.',
