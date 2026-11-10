@@ -6,6 +6,7 @@ export declare const NS = "sapper";
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export declare const zh: {
     title: string;
+    'library.title': string;
     loading: string;
     'empty.title': string;
     'empty.body': string;

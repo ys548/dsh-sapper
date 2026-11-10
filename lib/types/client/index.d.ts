@@ -14,8 +14,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         'sapper': SapperKey;
     }
 }
-/** Panel id shared by the sidebar entry and the main-column page. */
+/** Panel id shared by the board launcher and the main-column page. */
 export declare const SAPPER_PANEL_ID = "sapper-board";
+/** Panel id shared by the vulnerability-library launcher and its page. */
+export declare const VULN_PANEL_ID = "sapper-vulns";
 /** Required services: the slot registry and dictionaries. */
 export declare const inject: string[];
 /**
