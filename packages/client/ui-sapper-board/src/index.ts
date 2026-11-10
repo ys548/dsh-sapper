@@ -142,7 +142,7 @@ function reportLevel(raw: string): string {
 function reportSummary(text: string): string {
   const match = text.match(/^#{1,3}[^\n]*漏洞描述[^\n]*\n+([\s\S]*?)(?=\n#{1,3}\s)/m)
   if (!match) return ''
-  const paragraph = match[1].split(/\n\s*\n/).map(part => part.trim()).find(part =>
+  const paragraph = (match[1] ?? '').split(/\n\s*\n/).map(part => part.trim()).find(part =>
     part !== '' && !part.startsWith('|') && !part.startsWith('>') && !part.startsWith('```') && !part.startsWith('- '))
   return (paragraph ?? '').replace(/`/g, '').replace(/\s+/g, ' ').slice(0, 220)
 }

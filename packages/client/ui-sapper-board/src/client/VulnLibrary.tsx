@@ -50,7 +50,7 @@ const toolbarStyle: CSSProperties = {
 function reportTarget(path: string): string {
   const parts = path.split(/[/\\]/)
   const at = parts.lastIndexOf('漏洞报告')
-  const raw = at > 0 ? parts[at - 1] : ''
+  const raw = (at > 0 ? parts[at - 1] : '') ?? ''
   return raw.replace(/^【/, '').replace(/】$/, '')
 }
 
