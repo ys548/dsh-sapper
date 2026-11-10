@@ -130,6 +130,9 @@ GUI 实际加载这里）。本机没有 DSH 源码树、跑不了 tsdown 时，
 现已拉回本仓库并回写 fork 源头。**之后改预设文案，直接改 fork 源头**，再 `sync-assets` + 重建 + 同步安装副本；
 不要再直接改安装副本（会再次分叉）。
 
+fork 源码树整体镜像在同一远程的 **`source-tree` 分支**（与本仓库 master 是两条无关历史，各自独立演进，
+勿互相覆盖）；本机没有源码树时，可从该分支取回 host 路由与 client 源头。
+
 ## 已知限制
 
 - **桌面端（DSH 应用）与浏览器里的 Web GUI 都正常**：两者都跑 `web-app` bundle，`sapper` / `sapper-worker` 预设照常加载。
