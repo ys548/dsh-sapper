@@ -102,6 +102,34 @@ pnpm exec tsc -b packages/bundle/dsh-sapper/tsconfig.json
 
 `presets/` 与 `sapper/` 是生成物，不要在包里手改（改了会被下一次 `sync-assets` 覆盖）。
 
+## 重建后回归验证清单
+
+`lib/` 里的行为补丁以三处为单位同步：**源码**（本仓库 `src/` 是 client 主源；fork 树
+`deepseek-harness/packages/client/ui-sapper-board/` 持有 host 路由与 client 镜像）→
+**产物**（`lib/client.js`、`lib/index.js`）→ **安装副本**（`~/.dsh/profiles/desktop/node_modules/dsh-sapper/`，
+GUI 实际加载这里）。本机没有 DSH 源码树、跑不了 tsdown 时，改动靠手工三写；
+重建会按源码重新生成产物，之后必须逐条核对下表——任何一条不对，就是对应源码改动没进构建：
+
+| # | 行为 | 怎么验 | 源码位置 |
+|---|------|--------|----------|
+| 1 | 目标下拉向左展开，右侧不被裁掉 | 打开漏洞报告面板，点开右上角「全部目标」 | `VulnLibrary.tsx` TargetSwitch 菜单 `right: 0` |
+| 2 | 重开面板秒显上次内容（不闪「正在读取事实图…」） | 切走再切回漏洞报告面板 | `useSapperGraph.ts` 模块级缓存（stale-while-revalidate） |
+| 3 | 面板记住上次选的目标 | 选一个目标 → 切走 → 回来仍停在它 | `VulnLibrary.tsx` `TARGET_KEY`（localStorage） |
+| 4 | 工具栏按钮悬停高亮 | 悬停文件夹/箭头/「全部目标」/搜索框 | `VulnLibrary.tsx` `HOVER_CSS` |
+| 5 | 报告跨 engagement 并集 | 默认「全部目标」直接列出所有项目的报告（含 `pentest-dsh/reports`） | fork `ui-sapper-board/src/index.ts` `reportsForStore` + 路由并集 |
+| 6 | 工具栏搜索框即时过滤 | 输入关键字，列表与计数同步变化 | `VulnLibrary.tsx` 工具栏 input（`query`） |
+| 7 | 页面隐藏时停止轮询，回来立即刷新一次 | 切到别的窗口，Network 面板无 4s 周期请求；切回立即出现一次请求 | `useSapperGraph.ts` `visibilitychange` |
+| 8 | 目标下拉键盘可用 | 聚焦后 ↑↓ 移动高亮、Enter 选择、Esc 关闭 | `VulnLibrary.tsx` TargetSwitch `onKeyDown` |
+
+验证命令：`node scripts/check-lib.mjs && node scripts/verify-package.mjs`（无需依赖）。
+
+### 预设改动的同步链（2026-11-10 起）
+
+`presets/` 由 `sync-assets` 从 fork 树 `packages/bundle/web-app/presets/` 生成。2026-11-10 的两处改动
+（`sapper.patch.yml` 三档输出风格、`pentest-01-tools/SKILL.md` 后台启动器说明）当时只落在安装副本里，
+现已拉回本仓库并回写 fork 源头。**之后改预设文案，直接改 fork 源头**，再 `sync-assets` + 重建 + 同步安装副本；
+不要再直接改安装副本（会再次分叉）。
+
 ## 已知限制
 
 - **桌面端（DSH 应用）与浏览器里的 Web GUI 都正常**：两者都跑 `web-app` bundle，`sapper` / `sapper-worker` 预设照常加载。

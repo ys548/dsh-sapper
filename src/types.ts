@@ -74,6 +74,8 @@ export interface VulnReport {
   path: string
   /** Vulnerable URL recorded in the report, when it has one. */
   url?: string
+  /** Fact id backing a not-yet-written finding; absent for written reports. */
+  id?: string
 }
 
 /** The whole graph as the board renders it. */

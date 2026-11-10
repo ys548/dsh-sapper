@@ -5,7 +5,7 @@
  * reports: name, short description, rating, and the report file.
  */
 
-import type { CSSProperties } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SapperTarget, VulnReport } from '../types.ts'
 import { auditedFindings } from './audit.ts'
@@ -73,6 +73,25 @@ interface TargetChoice {
   cwd: string
 }
 
+/** localStorage key for the target the panel reopens on. */
+const TARGET_KEY = 'dsh.sapper.report-target'
+
+/**
+ * Target the panel was last left on, so reopening lands there instead of on
+ * whichever engagement the Host resolves first.
+ * @returns the stored label and store directory, or null.
+ */
+function storedTarget(): TargetChoice | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TARGET_KEY) ?? 'null') as Partial<TargetChoice> | null
+    if (typeof parsed?.label !== 'string' || typeof parsed?.cwd !== 'string') return null
+    if (parsed.label === '' || parsed.cwd === '') return null
+    return { label: parsed.label, cwd: parsed.cwd }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Targets the user can pick: hosts named by each engagement, not the store folder.
  * @param targets - engagements the Host listed.
@@ -106,7 +125,7 @@ function reportRows(graph: { facts: Parameters<typeof auditedFindings>[0]; repor
       const data = fact?.data ?? {}
       const host = typeof data.host === 'string' ? data.host : typeof data.ip === 'string' ? data.ip : ''
       const url = typeof data.url === 'string' ? data.url : ''
-      return { name: row.title, summary: row.description, level: row.level, path: '', target: host, url }
+      return { name: row.title, summary: row.description, level: row.level, path: '', target: host, url, id: row.id }
     })
 }
 
@@ -115,8 +134,9 @@ function reportRows(graph: { facts: Parameters<typeof auditedFindings>[0]; repor
  * @returns the report list for the current engagement.
  */
 export function VulnLibrary() {
-  const [cwd, setCwd] = useState<string | null>(null)
-  const [picked, setPicked] = useState<string | null>(null)
+  const remembered = useMemo(storedTarget, [])
+  const [cwd, setCwd] = useState<string | null>(remembered?.cwd ?? null)
+  const [picked, setPicked] = useState<string | null>(remembered?.label ?? null)
   const [query, setQuery] = useState('')
   const { graph, loading, error, targets } = useSapperGraph(false, cwd)
   const menu = useMemo(() => targetChoices(targets), [targets])
@@ -134,9 +154,30 @@ export function VulnLibrary() {
 
   return (
     <div style={rootStyle}>
+      <style>{HOVER_CSS}</style>
       <div style={{ ...toolbarStyle, gap: 8, overflow: 'visible', zIndex: 5 }}>
         <strong style={{ fontSize: 14, fontWeight: 650, flexShrink: 0 }}>漏洞报告</strong>
         <span style={{ color: MUTED, fontSize: 12, flexShrink: 0 }}>{shown.length}</span>
+        <input
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          placeholder="搜索名称"
+          aria-label="搜索漏洞报告"
+          style={{
+            width: 160,
+            height: 28,
+            boxSizing: 'border-box',
+            flexShrink: 1,
+            minWidth: 90,
+            padding: '0 10px',
+            borderRadius: 8,
+            border: '1px solid var(--dsw-alias-border-l2)',
+            background: 'var(--dsw-alias-bg-layer-2)',
+            color: LABEL,
+            font: 'inherit',
+            fontSize: 13,
+          }}
+        />
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
         <TargetSwitch
           names={names}
@@ -144,11 +185,15 @@ export function VulnLibrary() {
           onPick={(name) => {
             if (name === '') {
               setPicked(null)
+              localStorage.removeItem(TARGET_KEY)
               return
             }
             setPicked(name)
             const choice = menu.find(item => item.label === name)
-            if (choice) setCwd(choice.cwd)
+            if (choice) {
+              setCwd(choice.cwd)
+              localStorage.setItem(TARGET_KEY, JSON.stringify({ label: name, cwd: choice.cwd }))
+            }
           }}
         />
         <OpenFolderButton directory={reportDirectory(rows, active || fromReports[0] || '')} />
@@ -164,7 +209,7 @@ export function VulnLibrary() {
           <div style={{ color: MUTED, fontSize: 13, lineHeight: 1.7 }}>这个目标还没有漏洞报告。</div>
         ) : shown.map(row => (
           <ReportCard
-            key={row.path !== '' ? row.path : row.name}
+            key={row.path !== '' ? row.path : row.id ?? row.name}
             row={row}
             onOpen={() => { if (row.path !== '') void openReportFile(row.path) }}
           />
@@ -201,13 +246,50 @@ function TargetSwitch({
   }, [open])
   if (names.length === 0) return null
 
+  const move = (delta: number): void => {
+    const at = hover === null ? -1 : names.indexOf(hover)
+    const next = at === -1
+      ? (delta > 0 ? 0 : names.length - 1)
+      : Math.min(names.length - 1, Math.max(0, at + delta))
+    setHover(names[next] ?? null)
+  }
+  const onKeyDown = (event: ReactKeyboardEvent): void => {
+    if (!open) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        setOpen(true)
+      }
+      return
+    }
+    if (event.key === 'Escape') {
+      setOpen(false)
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      move(1)
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      move(-1)
+      return
+    }
+    if (event.key === 'Enter' && hover !== null) {
+      event.preventDefault()
+      onPick(hover)
+      setOpen(false)
+    }
+  }
+
   return (
-    <div ref={root} style={{ position: 'relative', flexShrink: 1, minWidth: 0, maxWidth: 280 }}>
+    <div ref={root} onKeyDown={onKeyDown} style={{ position: 'relative', flexShrink: 1, minWidth: 0, maxWidth: 280 }}>
       <button
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="切换目标"
+        className="dsh-sapper-hoverable"
         onClick={() => setOpen(value => !value)}
         title={active || '全部目标'}
         style={{ ...iconBtnStyle, maxWidth: '100%', justifyContent: 'flex-start', gap: 8, padding: '0 12px' }}
@@ -221,7 +303,7 @@ function TargetSwitch({
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
-            left: 0,
+            right: 0,
             zIndex: 6,
             minWidth: 180,
             maxWidth: 280,
@@ -416,7 +498,7 @@ function OpenFolderButton({ directory }: { directory: string }) {
   const label = APP_NAME[preferred] ?? preferred
   return (
     <div ref={root} style={{ position: 'relative', display: 'inline-flex' }}>
-      <div title={`用 ${label} 打开`} style={{
+      <div title={`用 ${label} 打开`} className="dsh-sapper-splitbtn" style={{
         display: 'inline-flex',
         alignItems: 'stretch',
         height: 24,
@@ -492,7 +574,6 @@ const splitMainStyle: CSSProperties = {
   justifyContent: 'center',
   padding: '3px 5px',
   border: 0,
-  background: 'none',
   cursor: 'pointer',
 }
 
@@ -503,7 +584,6 @@ const splitChevronStyle: CSSProperties = {
   padding: '3px 4px 3px 3px',
   border: 0,
   borderLeft: '0.5px solid var(--dsw-alias-border-l4)',
-  background: 'none',
   color: MUTED,
   cursor: 'pointer',
 }
@@ -521,6 +601,17 @@ const appMenuStyle: CSSProperties = {
   boxShadow: '0 12px 32px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent)',
 }
 
+/**
+ * Hover states for the toolbar buttons; inline styles cannot express :hover.
+ * The base backgrounds live here too so the hover rule can override them.
+ */
+const HOVER_CSS = `
+.dsh-sapper-hoverable { background: var(--dsw-alias-bg-layer-2); }
+.dsh-sapper-hoverable:hover:not(:disabled) { background: var(--dsw-specific-sidebar-nav-item-active); }
+.dsh-sapper-splitbtn > button { background: none; }
+.dsh-sapper-splitbtn > button:hover:not(:disabled) { background: var(--dsw-specific-sidebar-nav-item-active); }
+`
+
 const iconBtnStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
@@ -530,77 +621,9 @@ const iconBtnStyle: CSSProperties = {
   padding: '0 10px',
   border: '1px solid var(--dsw-alias-border-l2)',
   borderRadius: 8,
-  background: 'var(--dsw-alias-bg-layer-2)',
   color: LABEL,
   cursor: 'pointer',
   font: 'inherit',
-}
-
-/**
- * Secondary actions, kept off the bar so the target control stays a short name.
- * @param props - the current search and how many reports are listed.
- * @returns the more button.
- */
-function MoreMenu({
-  query,
-  count,
-  onQuery,
-}: {
-  query: string
-  count: number
-  onQuery: (value: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return undefined
-    const close = (event: PointerEvent): void => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false)
-    }
-    window.addEventListener('pointerdown', close)
-    return () => window.removeEventListener('pointerdown', close)
-  }, [open])
-  return (
-    <div ref={root} style={{ position: 'relative', flexShrink: 0 }}>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label="更多" onClick={() => setOpen(value => !value)} style={iconBtnStyle}>
-        <span style={{ letterSpacing: 1, fontSize: 16, lineHeight: 1 }}>···</span>
-      </button>
-      {open ? (
-        <div role="menu" style={{
-          position: 'absolute',
-          top: 'calc(100% + 6px)',
-          left: 0,
-          zIndex: 6,
-          width: 220,
-          padding: 10,
-          borderRadius: 10,
-          background: 'var(--dsw-alias-bg-layer-3)',
-          border: '1px solid var(--dsw-alias-border-l2)',
-          boxShadow: '0 12px 32px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent)',
-        }}>
-          <div style={{ color: MUTED, fontSize: 12, marginBottom: 8 }}>{count} 份</div>
-          <input
-            value={query}
-            onChange={event => onQuery(event.target.value)}
-            placeholder="搜索名称"
-            aria-label="搜索漏洞报告"
-            style={{
-              width: '100%',
-              height: 32,
-              boxSizing: 'border-box',
-              borderRadius: 8,
-              border: '1px solid var(--dsw-alias-border-l2)',
-              background: 'var(--dsw-alias-bg-layer-2)',
-              color: LABEL,
-              padding: '0 10px',
-              font: 'inherit',
-              fontSize: 13,
-            }}
-          />
-        </div>
-      ) : null}
-    </div>
-  )
 }
 
 /** Small chevron matching the app's menu buttons. */
