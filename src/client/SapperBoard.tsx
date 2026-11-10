@@ -35,10 +35,6 @@ const GAP_X = 148
 const GAP_Y = 18
 const PAD_X = 48
 const PAD_Y = 40
-const MAX_PER_COLUMN = 5
-const LANE_GAP = 10
-const LANE_MARGIN = 14
-const MAX_LANES = 6
 
 type NodeType = 'asset' | 'finding' | 'clue' | 'objective' | 'intent'
 

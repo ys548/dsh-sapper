@@ -113,7 +113,9 @@ function targetChoices(targets: SapperTarget[]): TargetChoice[] {
   return rows
 }
 
-function reportRows(graph: { facts: Parameters<typeof auditedFindings>[0]; reports?: VulnReport[] } | null): Array<VulnReport & { target: string }> {
+function reportRows(
+  graph: { facts: Parameters<typeof auditedFindings>[0]; reports?: VulnReport[] } | null,
+): Array<VulnReport & { target: string }> {
   if (!graph) return []
   if (Array.isArray(graph.reports) && graph.reports.length > 0) {
     return graph.reports.map(row => ({ ...row, target: reportTarget(row.path) }))
