@@ -1,0 +1,13 @@
+{
+  "name": "sapper-intel",
+  "version": "0.1.0",
+  "description": "开源漏洞情报监控：轮询 GitHub 仓库 commit，agent 判读 diff，达门槛的写入 sapper 事实图并建复现工单",
+  "author": { "name": "ys548" },
+  "mcpServers": {
+    "intel": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"]
+    }
+  },
+  "commands": "./commands"
+}
