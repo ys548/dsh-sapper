@@ -1,8 +1,0 @@
-{
-  "plugins": {
-    "visualizeDefaultOffMigrated": true,
-    "enabledPlugins": {
-      "visualize@zcode-plugins-official": true
-    }
-  }
-}
