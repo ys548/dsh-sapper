@@ -2136,7 +2136,7 @@ pwsh -File <技能目录>/infogather/domain-icp-scan.ps1
 pwsh -File <技能目录>/infogather/domain-icp-scan.ps1 -Domains "<目标域名>,<目标域名>"
 
 # 从文件读域名（每行一个）
-pwsh -File <技能目录>/infogather/domain-icp-scan.ps1 -DomainFile D:\list.txt
+pwsh -File <技能目录>/infogather/domain-icp-scan.ps1 -DomainFile <输入文件>
 ```
 
 > ⚠️ Windows 无 pwsh 时用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ...`
