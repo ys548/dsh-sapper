@@ -51,7 +51,11 @@ for (const skill of skills) {
   const text = readFileSync(file, 'utf8')
   const name = /^name:\s*['"]?([^'"\n]+)['"]?\s*$/m.exec(text.split('\n---')[0] ?? '')?.[1]
   note(name === skill.name, `skill ${skill.name} declares name ${String(name)}`)
+  // Tool paths live only in presets/toolbox.json (per-machine registry); skill bodies must stay machine-agnostic.
+  const absPath = /[DE]:[\\/]/.test(text)
+  note(!absPath, `skill ${skill.name} embeds a Windows absolute path (use <TOOL:key> + presets/toolbox.json)`)
 }
+note(existsSync(join(ROOT, 'presets/toolbox.json')), 'presets/toolbox.json registry is missing')
 const lanes = readdirSync(join(ROOT, 'presets/sapper-lanes')).filter((file) => file.endsWith('.md'))
 note(skills.length === 43, `expected 43 skills, found ${skills.length}`)
 note(lanes.length === 7, `expected 7 lane specs, found ${lanes.length}`)
