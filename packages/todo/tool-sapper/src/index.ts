@@ -317,17 +317,26 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: 'sapper_init',
     description:
-      'Create the sapper fact graph for a target directory. Run once per engagement before recording '
-      + 'anything; an existing store is reported instead of being recreated.',
+      'Create the sapper fact graph for a target directory. Run once per engagement. A graph from a '
+      + 'FINISHED engagement is archived automatically and a fresh one initialized; an ACTIVE graph is '
+      + 'kept and reported so you can continue it with sapper_board — re-run with force only when the '
+      + 'active goal is not yours.',
     parameters: {
       goal: { type: 'string', required: true, description: 'Engagement goal, one sentence.' },
       origin: { type: 'string', description: 'Optional origin or authorization reference (ticket id, SOW, scope doc).' },
+      force: {
+        type: 'boolean',
+        description: 'Replace an ACTIVE graph that belongs to a different engagement. The old graph is '
+          + 'archived, never deleted; a symlinked/junction store is re-pointed, its target untouched.',
+      },
       cwd: { type: 'string', description: 'Target directory that will hold the .sapper store.' },
     },
     output: passthroughOutput,
     presentCall: args => ({ card: 'generic', title: 'sapper init', rawInput: args }),
     async execute(args) {
-      const argv = ['init', '--goal', args.goal]
+      const argv = ['init']
+      if (args.force) argv.push('--force')
+      argv.push('--goal', args.goal)
       if (args.origin) argv.push('--origin', args.origin)
       const out = await runSapper(config, argv, workdirFor(args))
       return { ok: true, output: out }
