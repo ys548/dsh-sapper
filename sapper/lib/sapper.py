@@ -48,6 +48,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1593,18 +1594,85 @@ def _assert_safe_store_root(root: Path, action: str) -> None:
         )
 
 
+def _is_linklike(path: Path) -> bool:
+    """True when `path` is a symlink or a Windows junction: a reparse point
+    standing in front of another directory.  Such a path must be replaced,
+    never recursed into."""
+    if path.is_symlink():
+        return True
+    try:
+        st = path.stat(follow_symlinks=False)
+    except OSError:
+        return False
+    return getattr(st, "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+
+
+def _read_project(root: Path) -> dict | None:
+    """Parsed project.json of the store at `root`, or None when absent/unreadable."""
+    try:
+        value = json.loads((root / "project.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _store_summary(root: Path) -> str:
+    """One-line engagement summary read from project.json, for init messages."""
+    project = _read_project(root)
+    if project is None:
+        return "project.json unreadable"
+    facts = project.get("counters", {}).get("fact", "?")
+    return (
+        f"goal: {project.get('goal', '?')}; {facts} facts; "
+        f"status: {project.get('status', '?')}"
+    )
+
+
 def cmd_init(args) -> int:
     store = Store(Path(args.store))
-    if store.exists() and not args.force:
-        raise FGError(f"graph exists at {store.root}; use --force to overwrite")
-    if args.force and store.root.exists():
-        import shutil
-        _assert_safe_store_root(store.root, "overwrite")
-        # `--force` is an explicit destructive operation.  Do not hold the
-        # graph's lock while deleting that lock file itself; another process
-        # waiting on the old inode would otherwise be detached from the new
-        # graph.  Normal (non-force) initialization is serialized in Store.init.
-        shutil.rmtree(store.root)
+    linklike = _is_linklike(store.root)
+    has_store = store.exists()
+    if has_store or linklike:
+        status = (_read_project(store.root) or {}).get("status")
+        if not args.force and has_store and status in (None, "active"):
+            # An active (or unreadable) graph may be mid-engagement: never
+            # replace it implicitly.  Report and let the operator choose —
+            # resuming is the normal case, force is the explicit opt-out.
+            print(f"active engagement already initialized at {store.root} ({_store_summary(store.root)})")
+            print("continue it with `sapper board`, or re-run with --force to archive it and start a NEW engagement")
+            return 0
+        if linklike:
+            # Replace the link itself; whatever it points at keeps its data.
+            # Reached via --force, a finished graph, or a dangling link.
+            target = store.root.resolve()
+            try:
+                store.root.rmdir()
+            except OSError:
+                store.root.unlink()
+            print(f"replaced link {store.root} (previous store remains at {target})")
+        else:
+            # A finished graph is archived automatically; --force reaches here
+            # for active ones.  Archiving never deletes: engagement graphs are
+            # evidence.  Rename (not rmtree) also keeps a process holding
+            # `.lock` from being detached mid-delete; Store.init serializes
+            # the fresh graph.
+            _assert_safe_store_root(store.root, "archive")
+            base = store.root.with_name(
+                store.root.name + ".archived-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+            )
+            stamped = base
+            suffix = 2
+            while stamped.exists():  # two archives within one second
+                stamped = base.with_name(f"{base.name}-{suffix}")
+                suffix += 1
+            try:
+                store.root.rename(stamped)
+            except OSError as exc:
+                raise FGError(
+                    f"cannot archive existing graph at {store.root} "
+                    f"(locked by a running session?): {exc}"
+                )
+            print(f"archived existing graph ({_store_summary(stamped)}) to {stamped}")
     origin = args.origin or ""
     goal = args.goal
     if not goal:

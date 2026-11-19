@@ -130,6 +130,28 @@ GUI 实际加载这里）。本机没有 DSH 源码树、跑不了 tsdown 时，
 现已拉回本仓库并回写 fork 源头。**之后改预设文案，直接改 fork 源头**，再 `sync-assets` + 重建 + 同步安装副本；
 不要再直接改安装副本（会再次分叉）。
 
+### sapper CLI 与 sapper_init 的同步链（2026-11-19 起）
+
+`sapper init` 对已存在图的语义按图状态分流，全程**归档，绝不删除**，并修复了 Windows
+junction/symlink 上的 traceback；`sapper_init` 工具新增 `force` 参数。行为：
+
+- 旧图 **active**（或 project.json 不可读）→ 不报错：打印摘要与指引后 exit 0（继续用
+  `sapper board`，或 `--force` 归档旧图开新交战）
+- 旧图 **completed** → 无需 force，自动归档为 `*.archived-<时间戳>`（同秒冲突加 `-2` 后缀）后建新图
+- junction/symlink → 只替换链接本身，目标 store 原样；dangling 链接视同无图直接重建
+- 归档 rename 失败（有会话持 `.lock`）转清晰报错
+
+两条同步链，共五处副本：
+
+| 层 | 源头（canonical） | 副本 |
+|---|---|---|
+| Python CLI | `sapper-v2-18-champion/lib/sapper.py`（`_is_linklike`/`_read_project` + `cmd_init` 分流归档） | 本仓库 `sapper/lib/sapper.py`、安装副本 `sapper/lib/sapper.py`、fork 树 `packages/bundle/dsh-sapper/sapper/lib/sapper.py` |
+| 工具 schema | fork 树 `packages/todo/tool-sapper/src/index.ts`（`sapper_init` 的 `force` 参数与描述） | 本仓库 `lib/tool.js` 与安装副本 `lib/tool.js`（同块手工镜像，含 execute 的 `--force` 注入） |
+
+回归验证（临时目录冒烟，无需 GUI）：active 图重复 `init` → exit 0 指引；completed 图重复 `init`
+→ 自动归档 + 新图；`init --force`（含同一秒两次）→ 归档带去重后缀；指向 active store 的 junction
+无 force 为 no-op、带 force 后根路径变真实目录且目标完好；dangling junction 直接重建。
+
 fork 源码树整体镜像在同一远程的 **`source-tree` 分支**（与本仓库 master 是两条无关历史，各自独立演进，
 勿互相覆盖）；本机没有源码树时，可从该分支取回 host 路由与 client 源头。
 
